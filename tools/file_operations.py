@@ -892,8 +892,14 @@ class ShellFileOperations(FileOperations):
             # overwrite the original bytes with mojibake. Treat a file whose
             # sample carries the replacement char as binary (read-only) so the
             # agent can't corrupt it. Legitimate UTF-8 text effectively never
-            # contains U+FFFD.
-            if "\ufffd" in content_sample[:1000]:
+            # contains U+FFFD — with one exception: the sample is taken with
+            # `head -c 1000`, which can cut a multi-byte UTF-8 char in half,
+            # and the terminal env decodes that partial byte as a *trailing*
+            # U+FFFD. Only a replacement char inside the sample (not in the
+            # final position) is therefore evidence of real binary content;
+            # a trailing one is a truncation artifact.
+            probe = content_sample[:1000]
+            if probe and "\ufffd" in probe[:-1]:
                 return True
             non_printable = sum(1 for c in content_sample[:1000]
                                if ord(c) < 32 and c not in '\n\r\t')

@@ -673,3 +673,29 @@ class TestReadNonUtf8IsBinary:
         ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
         # Proper UTF-8 (including non-ASCII) must still read as text.
         assert ops._is_likely_binary("notes.txt", "café résumé\nsecond\n") is False
+
+
+class TestByteTruncatedUtf8NotFlaggedBinary:
+    """A `head -c 1000` sample cut mid-char decodes to a single *trailing*
+    U+FFFD. That artifact must not flag a legitimate UTF-8 text file as binary.
+
+    Regression: read_file on CJK/emoji-heavy markdown (vault notes, kanban
+    dashboards) whose first 1000 bytes happen to split a 3/4-byte char was
+    wrongly reported as "Binary file - cannot display as text".
+    """
+
+    # "血脂异常 LDL 194 mg/dL\n" = 27 bytes/repeat → 37 repeats = 999 bytes,
+    # so byte 1000 always lands inside a 3-byte CJK char.
+    _UNIT = "血脂异常 LDL 194 mg/dL\n"
+
+    def test_trailing_replacement_char_not_flagged(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        raw = (self._UNIT * 40).encode("utf-8")
+        sample = raw[:1000].decode("utf-8", "replace")
+        assert sample.endswith("\ufffd")  # precondition: mid-char cut
+        assert ops._is_likely_binary("笔记.md", sample) is False
+
+    def test_mid_sample_replacement_char_still_flagged(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        # U+FFFD anywhere *inside* the sample still means real non-UTF-8 bytes.
+        assert ops._is_likely_binary("notes.txt", "caf\ufffdrésumé\n") is True
